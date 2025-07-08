@@ -30,6 +30,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.IOException;
 
+import android.os.Environment;
+
 public class SQLitePlugin extends CordovaPlugin {
 
     /**
@@ -89,6 +91,7 @@ public class SQLitePlugin extends CordovaPlugin {
         JSONObject o;
         String echo_value;
         String dbname;
+        String storageDirectory;
 
         switch (action) {
             case echoStringValue:
@@ -115,7 +118,7 @@ public class SQLitePlugin extends CordovaPlugin {
                 o = args.getJSONObject(0);
                 dbname = o.getString("path");
 
-                deleteDatabase(dbname, cbc);
+                deleteDatabase(dbname, cbc, null);
 
                 break;
 
@@ -201,14 +204,29 @@ public class SQLitePlugin extends CordovaPlugin {
      *
      * @param dbName   The name of the database file
      */
-    private SQLiteAndroidDatabase openDatabase(String dbname, boolean createFromResource, CallbackContext cbc, boolean old_impl) throws Exception {
+    private SQLiteAndroidDatabase openDatabase(String dbname, boolean createFromResource, CallbackContext cbc, boolean old_impl, String storageDirectory) throws Exception {
         try {
             // ASSUMPTION: no db (connection/handle) is already stored in the map
             // [should be true according to the code in DBRunner.run()]
 
-            // File dbfile = this.cordova.getActivity().getDatabasePath(dbname);
-            File dbfile = new File(this.cordova.getActivity().getExternalFilesDir(null), dbname);
+            //
 
+            File dbfile;
+
+            if (storageDirectory == null || storageDirectory.isEmpty()) {
+                dbfile = this.cordova.getActivity().getDatabasePath(dbname);            
+            } else {
+                File storage = new File(Environment.getExternalStorageDirectory(), storageDirectory);
+                if (!storage.exists()) {
+                    boolean created = storage.mkdirs();
+                    if (!created) {
+                        Log.e("DB", "Unable to create folder " + storage.getAbsolutePath());                    
+                        throw new Exception("Unable to create folder " + storage.getAbsolutePath());
+                    }
+                }
+                dbfile = new File(storage, dbname);
+            }                        
+            
             if (!dbfile.exists() && createFromResource) this.createFromResource(dbname, dbfile);
 
             if (!dbfile.exists()) {
@@ -323,7 +341,7 @@ public class SQLitePlugin extends CordovaPlugin {
         }
     }
 
-    private void deleteDatabase(String dbname, CallbackContext cbc) {
+    private void deleteDatabase(String dbname, CallbackContext cbc, String storageDirectory) {
         DBRunner r = dbrmap.get(dbname);
         if (r != null) {
             try {
@@ -335,7 +353,7 @@ public class SQLitePlugin extends CordovaPlugin {
                 Log.e(SQLitePlugin.class.getSimpleName(), "couldn't close database", e);
             }
         } else {
-            boolean deleteResult = this.deleteDatabaseNow(dbname);
+            boolean deleteResult = this.deleteDatabaseNow(dbname, storageDirectory);
             if (deleteResult) {
                 cbc.success();
             } else {
@@ -351,9 +369,18 @@ public class SQLitePlugin extends CordovaPlugin {
      *
      * @return true if successful or false if an exception was encountered
      */
-    private boolean deleteDatabaseNow(String dbname) {
-        // File dbfile = this.cordova.getActivity().getDatabasePath(dbname);
-        File dbfile = new File(this.cordova.getActivity().getExternalFilesDir(null), dbname);
+    private boolean deleteDatabaseNow(String dbname, String storageDirectory) {        
+        File dbfile;
+        
+        if (storageDirectory == null || storageDirectory.isEmpty()) {
+            dbfile = this.cordova.getActivity().getDatabasePath(dbname); 
+        } else {
+            File storage = new File(Environment.getExternalStorageDirectory(), storageDirectory);
+            if (!storage.exists()) {
+                return true;
+            }
+            dbfile = new File(storage, dbname); 
+        } 
 
         try {
             return cordova.getActivity().deleteDatabase(dbfile.getAbsolutePath());
@@ -373,11 +400,17 @@ public class SQLitePlugin extends CordovaPlugin {
         final CallbackContext openCbc;
 
         SQLiteAndroidDatabase mydb;
+        private String storageDirectory;
 
         DBRunner(final String dbname, JSONObject options, CallbackContext cbc) {
             this.dbname = dbname;
             this.createFromResource = options.has("createFromResource");
             this.oldImpl = options.has("androidOldDatabaseImplementation");
+            try {
+                this.storageDirectory = options.has("androidDirectory") ? options.getString("androidDirectory") : null;
+            } catch (JSONException e) {
+                this.storageDirectory = null; // default to null
+            }            
             //Log.v(SQLitePlugin.class.getSimpleName(), "Android db implementation: built-in android.database.sqlite package");
             Log.v(SQLitePlugin.class.getSimpleName(), "Android db implementation: " + (oldImpl ? "built-in android.database.sqlite package (OLD)" : "Android-sqlite-connector (NDK)"));
             this.bugWorkaround = this.oldImpl && options.has("androidBugWorkaround");
@@ -390,7 +423,7 @@ public class SQLitePlugin extends CordovaPlugin {
 
         public void run() {
             try {
-                this.mydb = openDatabase(dbname, this.createFromResource, this.openCbc, this.oldImpl);
+                this.mydb = openDatabase(dbname, this.createFromResource, this.openCbc, this.oldImpl, this.storageDirectory);
             } catch (Exception e) {
                 Log.e(SQLitePlugin.class.getSimpleName(), "unexpected error, stopping db thread", e);
                 dbrmap.remove(dbname);
@@ -424,7 +457,7 @@ public class SQLitePlugin extends CordovaPlugin {
                         dbq.cbc.success();
                     } else {
                         try {
-                            boolean deleteResult = deleteDatabaseNow(dbname);
+                            boolean deleteResult = deleteDatabaseNow(dbname, this.storageDirectory);
                             if (deleteResult) {
                                 dbq.cbc.success();
                             } else {
