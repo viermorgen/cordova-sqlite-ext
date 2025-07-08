@@ -206,7 +206,8 @@ public class SQLitePlugin extends CordovaPlugin {
             // ASSUMPTION: no db (connection/handle) is already stored in the map
             // [should be true according to the code in DBRunner.run()]
 
-            File dbfile = this.cordova.getActivity().getDatabasePath(dbname);
+            // File dbfile = this.cordova.getActivity().getDatabasePath(dbname);
+            File dbfile = new File(this.cordova.getActivity().getExternalFilesDir(null), dbname);
 
             if (!dbfile.exists() && createFromResource) this.createFromResource(dbname, dbfile);
 
@@ -351,7 +352,8 @@ public class SQLitePlugin extends CordovaPlugin {
      * @return true if successful or false if an exception was encountered
      */
     private boolean deleteDatabaseNow(String dbname) {
-        File dbfile = this.cordova.getActivity().getDatabasePath(dbname);
+        // File dbfile = this.cordova.getActivity().getDatabasePath(dbname);
+        File dbfile = new File(this.cordova.getActivity().getExternalFilesDir(null), dbname);
 
         try {
             return cordova.getActivity().deleteDatabase(dbfile.getAbsolutePath());
